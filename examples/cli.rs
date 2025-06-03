@@ -158,10 +158,6 @@ struct Cli {
     /// Video frame rate
     #[arg(long, default_value_t = 60)]
     frame_rate: u32,
-
-    /// Exclude the title bar from capture
-    #[arg(long, default_value_t = false)]
-    exclude_title_bar: bool,
 }
 
 fn parse_cursor_capture(s: &str) -> CursorCaptureSettings {
@@ -193,7 +189,6 @@ fn start_capture<T>(
     cursor_capture: CursorCaptureSettings,
     draw_border: DrawBorderSettings,
     settings: CaptureSettings,
-    exclude_title_bar: bool,
 ) where
     T: TryInto<GraphicsCaptureItem> + Send + 'static,
 {
@@ -203,7 +198,6 @@ fn start_capture<T>(
         draw_border,
         ColorFormat::Rgba8,
         settings,
-        exclude_title_bar,
     );
 
     // Starts the capture and takes control of the current thread.
@@ -257,7 +251,6 @@ fn main() {
             cursor_capture,
             draw_border,
             capture_settings,
-            cli.exclude_title_bar,
         );
     } else if let Some(index) = cli.monitor_index {
         // May use Monitor::primary() instead
@@ -285,7 +278,6 @@ fn main() {
             cursor_capture,
             draw_border,
             capture_settings,
-            cli.exclude_title_bar,
         );
     } else {
         eprintln!("Either --window-name or --monitor-index must be provided");

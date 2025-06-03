@@ -49,7 +49,6 @@ pub struct Settings<Flags, T: TryInto<GraphicsCaptureItem>> {
     ///
     /// If set to `true`, the capture will attempt to crop out the title bar.
     /// This calculation relies on the system's standard caption height metric (`SM_CYCAPTION`).
-    pub(crate) exclude_title_bar: bool,
 }
 
 impl<Flags, T> Settings<Flags, T>
@@ -74,7 +73,6 @@ where
         draw_border: DrawBorderSettings,
         color_format: ColorFormat,
         flags: Flags,
-        exclude_title_bar: bool,
     ) -> Self {
         Self {
             item,
@@ -82,7 +80,6 @@ where
             draw_border,
             color_format,
             flags,
-            exclude_title_bar,
         }
     }
 
@@ -141,16 +138,6 @@ where
         &self.flags
     }
 
-    /// Get the exclude title bar setting
-    ///
-    /// # Returns
-    ///
-    /// True if title bar exclusion is enabled, false otherwise.
-    #[must_use]
-    #[inline]
-    pub const fn exclude_title_bar(&self) -> bool {
-        self.exclude_title_bar
-    }
 }
 pub trait AsWindow {
     fn as_window(&self) -> Option<&Window>;

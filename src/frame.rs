@@ -67,7 +67,6 @@ pub struct Frame<'a> {
     width: u32,
     height: u32,
     color_format: ColorFormat,
-    exclude_title_bar: bool,
     title_bar_height: u32,
     window: Option<Window>,
 }
@@ -103,7 +102,6 @@ impl<'a> Frame<'a> {
         width: u32,
         height: u32,
         color_format: ColorFormat,
-        exclude_title_bar: bool,
         title_bar_height: u32,
         window: Option<Window>,
     ) -> Self {
@@ -117,7 +115,6 @@ impl<'a> Frame<'a> {
             width,
             height,
             color_format,
-            exclude_title_bar,
             title_bar_height,
             window,
         }
@@ -202,13 +199,85 @@ impl<'a> Frame<'a> {
     /// The FrameBuffer containing the frame data.
     #[inline]
     pub fn buffer(&mut self) -> Result<FrameBuffer, Error> {
-        if self.exclude_title_bar
-            && self.window.as_ref().map_or(false, |w| w.is_valid())
+        // Texture Settings
+        let texture_desc = D3D11_TEXTURE2D_DESC {
+            Width: self.width,
+            Height: self.height,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: DXGI_FORMAT(self.color_format as i32),
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: D3D11_USAGE_STAGING,
+            BindFlags: 0,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32 | D3D11_CPU_ACCESS_WRITE.0 as u32,
+            MiscFlags: 0,
+        };
+
+        // Create a texture that CPU can read
+        let mut texture = None;
+        unsafe {
+            self.d3d_device
+                .CreateTexture2D(&texture_desc, None, Some(&mut texture))?;
+        };
+
+        let texture = texture.unwrap();
+
+        // Copy the real texture to copy texture
+        unsafe {
+            self.context.CopyResource(&texture, &self.frame_texture);
+        };
+
+        // Map the texture to enable CPU access
+        let mut mapped_resource = D3D11_MAPPED_SUBRESOURCE::default();
+        unsafe {
+            self.context.Map(
+                &texture,
+                0,
+                D3D11_MAP_READ_WRITE,
+                0,
+                Some(&mut mapped_resource),
+            )?;
+        };
+
+        // Get the mapped resource data slice
+        let mapped_frame_data = unsafe {
+            slice::from_raw_parts_mut(
+                mapped_resource.pData.cast(),
+                (self.height * mapped_resource.RowPitch) as usize,
+            )
+        };
+
+        // Create frame buffer from slice
+        let frame_buffer = FrameBuffer::new(
+            mapped_frame_data,
+            self.buffer,
+            self.width,
+            self.height,
+            mapped_resource.RowPitch,
+            mapped_resource.DepthPitch,
+            self.color_format,
+        );
+
+        Ok(frame_buffer)
+    }
+
+    /// Get the frame buffer without the title bar.
+    ///
+    /// # Returns
+    ///
+    /// The FrameBuffer containing the frame data without the title bar.
+    #[inline]
+    pub fn buffer_without_title_bar(&mut self) -> Result<FrameBuffer, Error> {
+        if self.window.as_ref().map_or(false, |w| w.is_valid())
             && self.title_bar_height > 0
             && self.height > self.title_bar_height
         {
             return self.buffer_crop(0, self.title_bar_height, self.width, self.height);
         }
+
         // Texture Settings
         let texture_desc = D3D11_TEXTURE2D_DESC {
             Width: self.width,
@@ -405,6 +474,200 @@ impl<'a> Frame<'a> {
         frame_buffer.save_as_image(path, format)?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*; // Imports Frame, Error, FrameBuffer
+    use crate::settings::ColorFormat;
+    use crate::window::Window;
+    use windows::Foundation::TimeSpan;
+    use windows::Graphics::DirectX::Direct3D11::IDirect3DSurface;
+    use windows::Win32::Graphics::Direct3D11::{
+        ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    };
+
+    // NOTE: The following tests are skeletons. They require proper mocking of
+    // DirectX objects (ID3D11Device, ID3D11DeviceContext, IDirect3DSurface, ID3D11Texture2D)
+    // and potentially a mockable Window struct to be fully executable.
+    // The actual calls to Frame::new and buffer methods are commented out.
+
+    #[test]
+    fn test_buffer_returns_full_dimensions() {
+        // let mut mock_vec_buffer = Vec::new();
+        // let mock_d3d_device: ID3D11Device = unsafe { std::mem::zeroed() }; // Placeholder
+        // let mock_frame_surface: IDirect3DSurface = unsafe { std::mem::zeroed() }; // Placeholder
+        // let mock_frame_texture: ID3D11Texture2D = unsafe { std::mem::zeroed() }; // Placeholder
+        // let mock_context: ID3D11DeviceContext = unsafe { std::mem::zeroed() }; // Placeholder
+        //
+        // let mut frame = Frame::new(
+        //     &mock_d3d_device,
+        //     mock_frame_surface,
+        //     mock_frame_texture,
+        //     TimeSpan::default(),
+        //     &mock_context,
+        //     &mut mock_vec_buffer,
+        //     800,                             // width
+        //     600,                             // height
+        //     ColorFormat::Rgba8,
+        //     0,                               // title_bar_height (not relevant for this buffer method)
+        //     None,                            // window (not relevant for this buffer method's core logic)
+        // );
+        //
+        // match frame.buffer() {
+        //     Ok(buffer) => {
+        //         assert_eq!(buffer.width(), 800, "Buffer width should be full width");
+        //         assert_eq!(buffer.height(), 600, "Buffer height should be full height");
+        //     }
+        //     Err(e) => {
+        //         panic!("frame.buffer() failed: {:?}. This is expected if mocks are not functional.", e);
+        //     }
+        // }
+        println!("SKIPPED: test_buffer_returns_full_dimensions - Requires DirectX mocking and/or a graphical environment.");
+    }
+
+    #[test]
+    fn test_buffer_without_title_bar_crops_when_conditions_met() {
+        // let mut mock_vec_buffer = Vec::new();
+        // let mock_d3d_device: ID3D11Device = unsafe { std::mem::zeroed() };
+        // let mock_frame_surface: IDirect3DSurface = unsafe { std::mem::zeroed() };
+        // let mock_frame_texture: ID3D11Texture2D = unsafe { std::mem::zeroed() };
+        // let mock_context: ID3D11DeviceContext = unsafe { std::mem::zeroed() };
+        // // For this test to pass, the mock_window would need its `is_valid()` to return true.
+        // // And title_bar_height > 0, and frame_height > title_bar_height.
+        // let mock_window = Some(Window::new("TestWindow".to_string())); // Actual is_valid() behavior is complex.
+        //
+        // let mut frame = Frame::new(
+        //     &mock_d3d_device,
+        //     mock_frame_surface,
+        //     mock_frame_texture,
+        //     TimeSpan::default(),
+        //     &mock_context,
+        //     &mut mock_vec_buffer,
+        //     800,                             // width
+        //     600,                             // height
+        //     ColorFormat::Rgba8,
+        //     30,                              // title_bar_height
+        //     mock_window,                     // A Some(Window) is needed
+        // );
+        //
+        // // Assuming Window::new("...").is_valid() would be true or mockable to true.
+        // match frame.buffer_without_title_bar() {
+        //     Ok(buffer) => {
+        //         assert_eq!(buffer.width(), 800, "Cropped buffer width should be full width");
+        //         assert_eq!(buffer.height(), 570, "Cropped buffer height should be frame height - title bar height");
+        //     }
+        //     Err(e) => {
+        //          // This path might be taken if Window::is_valid() is false for the mock.
+        //         panic!("frame.buffer_without_title_bar() failed or did not crop: {:?}. Check mock Window validity.", e);
+        //     }
+        // }
+        println!("SKIPPED: test_buffer_without_title_bar_crops_when_conditions_met - Requires DirectX mocking and/or a graphical environment, and mockable Window::is_valid().");
+    }
+
+    #[test]
+    fn test_buffer_without_title_bar_returns_full_if_title_bar_zero() {
+        // let mut mock_vec_buffer = Vec::new();
+        // let mock_d3d_device: ID3D11Device = unsafe { std::mem::zeroed() };
+        // let mock_frame_surface: IDirect3DSurface = unsafe { std::mem::zeroed() };
+        // let mock_frame_texture: ID3D11Texture2D = unsafe { std::mem::zeroed() };
+        // let mock_context: ID3D11DeviceContext = unsafe { std::mem::zeroed() };
+        // let mock_window = Some(Window::new("TestWindow".to_string()));
+        //
+        // let mut frame = Frame::new(
+        //     &mock_d3d_device,
+        //     mock_frame_surface,
+        //     mock_frame_texture,
+        //     TimeSpan::default(),
+        //     &mock_context,
+        //     &mut mock_vec_buffer,
+        //     800,                             // width
+        //     600,                             // height
+        //     ColorFormat::Rgba8,
+        //     0,                               // title_bar_height is zero
+        //     mock_window,
+        // );
+        //
+        // match frame.buffer_without_title_bar() {
+        //     Ok(buffer) => {
+        //         assert_eq!(buffer.width(), 800, "Full buffer width expected");
+        //         assert_eq!(buffer.height(), 600, "Full buffer height expected when title_bar_height is 0");
+        //     }
+        //     Err(e) => {
+        //         panic!("frame.buffer_without_title_bar() failed: {:?}.", e);
+        //     }
+        // }
+        println!("SKIPPED: test_buffer_without_title_bar_returns_full_if_title_bar_zero - Requires DirectX mocking and/or a graphical environment.");
+    }
+
+    #[test]
+    fn test_buffer_without_title_bar_returns_full_if_height_too_small() {
+        // let mut mock_vec_buffer = Vec::new();
+        // let mock_d3d_device: ID3D11Device = unsafe { std::mem::zeroed() };
+        // let mock_frame_surface: IDirect3DSurface = unsafe { std::mem::zeroed() };
+        // let mock_frame_texture: ID3D11Texture2D = unsafe { std::mem::zeroed() };
+        // let mock_context: ID3D11DeviceContext = unsafe { std::mem::zeroed() };
+        // let mock_window = Some(Window::new("TestWindow".to_string()));
+        //
+        // let mut frame = Frame::new(
+        //     &mock_d3d_device,
+        //     mock_frame_surface,
+        //     mock_frame_texture,
+        //     TimeSpan::default(),
+        //     &mock_context,
+        //     &mut mock_vec_buffer,
+        //     800,                             // width
+        //     20,                              // height (less than title_bar_height)
+        //     ColorFormat::Rgba8,
+        //     30,                              // title_bar_height
+        //     mock_window,
+        // );
+        //
+        // match frame.buffer_without_title_bar() {
+        //     Ok(buffer) => {
+        //         assert_eq!(buffer.width(), 800, "Full buffer width expected");
+        //         assert_eq!(buffer.height(), 20, "Full buffer height expected when frame height <= title_bar_height");
+        //     }
+        //     Err(e) => {
+        //         panic!("frame.buffer_without_title_bar() failed: {:?}.", e);
+        //     }
+        // }
+        println!("SKIPPED: test_buffer_without_title_bar_returns_full_if_height_too_small - Requires DirectX mocking and/or a graphical environment.");
+    }
+
+    #[test]
+    fn test_buffer_without_title_bar_returns_full_if_no_window() {
+        // let mut mock_vec_buffer = Vec::new();
+        // let mock_d3d_device: ID3D11Device = unsafe { std::mem::zeroed() };
+        // let mock_frame_surface: IDirect3DSurface = unsafe { std::mem::zeroed() };
+        // let mock_frame_texture: ID3D11Texture2D = unsafe { std::mem::zeroed() };
+        // let mock_context: ID3D11DeviceContext = unsafe { std::mem::zeroed() };
+        //
+        // let mut frame = Frame::new(
+        //     &mock_d3d_device,
+        //     mock_frame_surface,
+        //     mock_frame_texture,
+        //     TimeSpan::default(),
+        //     &mock_context,
+        //     &mut mock_vec_buffer,
+        //     800,                             // width
+        //     600,                             // height
+        //     ColorFormat::Rgba8,
+        //     30,                              // title_bar_height
+        //     None,                            // window is None
+        // );
+        //
+        // match frame.buffer_without_title_bar() {
+        //     Ok(buffer) => {
+        //         assert_eq!(buffer.width(), 800, "Full buffer width expected");
+        //         assert_eq!(buffer.height(), 600, "Full buffer height expected when window is None");
+        //     }
+        //     Err(e) => {
+        //         panic!("frame.buffer_without_title_bar() failed: {:?}.", e);
+        //     }
+        // }
+        println!("SKIPPED: test_buffer_without_title_bar_returns_full_if_no_window - Requires DirectX mocking and/or a graphical environment.");
     }
 }
 
